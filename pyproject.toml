@@ -12,10 +12,10 @@ dynamic = ["version"] # determined dynamically from git refs. See tools.setuptoo
 description = "Tool for generating Clang JSON Compilation Database files for make-based build systems."
 license = {text = "GPL-3.0-or-later"}
 authors = [{name = "Nick Yamane", email = "nickdiego@igalia.com"}]
-requires-python = ">=3.3"
+requires-python = ">=3.12"
 dependencies = [
-  "click",
-  "bashlex",
+  "bashlex>=0.18",
+  "click>=8.3.2",
 ]
 readme = "README.md"
 keywords = [

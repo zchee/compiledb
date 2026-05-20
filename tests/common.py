@@ -28,10 +28,10 @@ def full_path(relpath):
 
 
 def input_file(relpath):
-    relpath = '{}'.format(relpath)
-    return open(full_path(relpath), 'r')
+    relpath = f'{relpath}'
+    return open(full_path(relpath))
 
 
 def output_file(relpath):
-    relpath = '{}'.format(relpath)
+    relpath = f'{relpath}'
     return open(full_path(relpath), 'a+')

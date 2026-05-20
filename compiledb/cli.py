@@ -20,23 +20,24 @@
 # ex: ts=2 sw=4 et filetype=python
 
 
-import click
+import logging
 import os
 import sys
-import logging
+
+import click
 
 from . import generate
 from .commands import make
 
-CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+CONTEXT_SETTINGS = {'help_option_names': ['-h', '--help']}
 
 
-class Options(object):
+class Options:
     """ Simple data class used to store command line options
     shared by all compiledb subcommands"""
 
     def __init__(self, infile, outfile, build_dir, exclude_files, no_build,
-                 verbose, overwrite, strict, add_predefined_macros, use_full_path, command_style):
+                 verbose, overwrite, strict, add_predefined_macros, use_full_path, command_style) -> None:
         self.infile = infile
         self.outfile = outfile
         self.build_dir = build_dir
@@ -81,12 +82,12 @@ class Options(object):
               'string rather than the default "arguments" list of strings.')
 @click.pass_context
 def cli(ctx, infile, outfile, build_dir, exclude_files, no_build, verbose, overwrite, no_strict, add_predefined_macros,
-        use_full_path, command_style):
+        use_full_path, command_style) -> None:
     """Clang's Compilation Database generator for make-based build systems.
        When no subcommand is used it will parse build log/commands and generates
        its corresponding Compilation database."""
     log_level = logging.DEBUG if verbose else logging.ERROR
-    logging.basicConfig(level=log_level, format=None)
+    logging.basicConfig(level=log_level)
     if ctx.invoked_subcommand is None:
         done = generate(infile, outfile, build_dir, exclude_files, overwrite, not no_strict, add_predefined_macros,
                         use_full_path, command_style)

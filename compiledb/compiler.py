@@ -9,7 +9,7 @@ _logger = logging.getLogger(__name__)
 
 
 class Compiler:
-    def __init__(self, name="gcc"):
+    def __init__(self, name="gcc") -> None:
         # Name of the compiler executable
         self._name = name
 
@@ -34,7 +34,7 @@ class Compiler:
             # language: ["-DMACRO1", "-DMACRO2=1"]
         }
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
     def _find_full_path(self):
@@ -67,7 +67,7 @@ class Compiler:
         else:
             return default
 
-    def _add_predefined_macros(self, language):
+    def _add_predefined_macros(self, language) -> None:
         """Add a list of macros predefined by the compiler for future use."""
         self._predefined_macros[language] = []
         # Dump all predefined compiler macros
@@ -112,14 +112,10 @@ class Compiler:
         return self._predefined_macros[language]
 
 
-_compilers = []
+_compilers = {}
 
 
 def get_compiler(name):
-    c = next((compiler for compiler in _compilers if name == compiler.name), None)
-
-    if c is None:
-        c = Compiler(name)
-        _compilers.append(c)
-
-    return c
+    if name not in _compilers:
+        _compilers[name] = Compiler(name)
+    return _compilers[name]

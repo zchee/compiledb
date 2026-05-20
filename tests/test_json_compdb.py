@@ -18,15 +18,17 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
+import json
 import os
 import shutil
-import json
-import pytest
 import sys
 from os.path import basename
-from compiledb import load_json_compdb, generate
-from tests.common import input_file, output_file, data_dir, full_path
 
+import pytest
+
+import compiledb
+from compiledb import generate, load_json_compdb, write_json_compdb
+from tests.common import data_dir, full_path, input_file, output_file
 
 multiple_commands_oneline_compdb = [
     {
@@ -52,7 +54,7 @@ multiple_commands_oneline_compdb = [
 nonexistent_files = ['compile_commands.json', 'nonexistent.json']
 
 
-def test_load_compdb_path_file_exists(caplog):
+def test_load_compdb_path_file_exists(caplog) -> None:
     try:
         orig_pwd = os.getcwd()
         os.chdir(data_dir)
@@ -78,35 +80,24 @@ def test_load_compdb_path_file_exists(caplog):
         os.chdir(orig_pwd)
 
 
-def test_load_compdb_ignores_stdout_filename(caplog):
+def test_load_compdb_ignores_stdout_filename(caplog) -> None:
     assert load_json_compdb(sys.stdout) == []
     assert caplog.text == ''
 
 
-def test_generate_input_file_exists_no_overwrite(caplog):
+def test_generate_input_file_exists_no_overwrite(caplog) -> None:
     shutil.copy(full_path('compile_commands2.json'),
                 full_path('result.json'))
     with output_file("result.json") as outfile:
         assert_generate_is_true(outfile, overwrite=False)
 
-    expected_compdb = multiple_commands_oneline_compdb + [
-        {
-            'file': 'bar.cpp',
-            'directory': 'data',
-            'arguments': [
-                'g++',
-                'bar.cpp',
-                '-o',
-                'bar.o'
-            ]
-        }
-    ]
+    expected_compdb = [*multiple_commands_oneline_compdb, {'file': 'bar.cpp', 'directory': 'data', 'arguments': ['g++', 'bar.cpp', '-o', 'bar.o']}]
     assert_compdb_file_equals(outfile.name, expected_compdb)
     assert 'Loaded compilation database with 1 entries from ' + basename(outfile.name) in caplog.text
     assert 'Writing compilation database with 3 entries to ' + basename(outfile.name) in caplog.text
 
 
-def test_generate_input_file_exists_overwrite(caplog):
+def test_generate_input_file_exists_overwrite(caplog) -> None:
     shutil.copy(full_path('compile_commands2.json'),
                 full_path('result.json'))
     with output_file("result.json") as outfile:
@@ -118,7 +109,7 @@ def test_generate_input_file_exists_overwrite(caplog):
 
 
 @pytest.mark.parametrize('overwrite', [False, True])
-def test_generate_output_stdout(capsys, caplog, overwrite):
+def test_generate_output_stdout(capsys, caplog, overwrite) -> None:
     assert_generate_is_true(sys.stdout, overwrite=overwrite)
     assert not os.path.exists("<stdout>")
     output = capsys.readouterr().out
@@ -132,7 +123,18 @@ def test_generate_output_stdout(capsys, caplog, overwrite):
     assert_compdb_equals(compdb, multiple_commands_oneline_compdb)
 
 
-def assert_generate_is_true(outstream, overwrite):
+def test_json_compdb_stdlib_fallback(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(compiledb, 'orjson', None)
+    outfile_path = tmp_path / 'compile_commands.json'
+    with outfile_path.open('w+', encoding='utf-8') as outfile:
+        write_json_compdb(multiple_commands_oneline_compdb, outfile)
+        outfile.seek(0)
+        assert outfile.read().endswith(os.linesep)
+        outfile.seek(0)
+        assert load_json_compdb(outfile) == multiple_commands_oneline_compdb
+
+
+def assert_generate_is_true(outstream, overwrite) -> None:
     with input_file('multiple_commands_oneline.txt') as instream:
         assert generate(
             infile=instream,
@@ -144,9 +146,9 @@ def assert_generate_is_true(outstream, overwrite):
         )
 
 
-def assert_compdb_file_equals(outfile_path, expected_compdb):
+def assert_compdb_file_equals(outfile_path, expected_compdb) -> None:
     try:
-        with open(outfile_path, 'r') as instream:
+        with open(outfile_path) as instream:
             compdb = json.load(instream)
             assert_compdb_equals(compdb, expected_compdb)
     finally:
@@ -154,7 +156,7 @@ def assert_compdb_file_equals(outfile_path, expected_compdb):
             os.remove(outfile_path)
 
 
-def assert_compdb_equals(compdb, expected_compdb):
+def assert_compdb_equals(compdb, expected_compdb) -> None:
     def get_key(item):
         return item['directory'], item['file'], item['arguments']
 

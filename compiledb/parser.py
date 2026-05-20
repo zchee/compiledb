@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 #   compiledb: Tool for generating LLVM Compilation Database
 #   files for make-based build systems.
@@ -18,9 +18,11 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-import bashlex
-import re
 import logging
+import re
+
+import bashlex
+import bashlex.ast
 
 from compiledb.compiler import get_compiler
 from compiledb.utils import run_cmd
@@ -37,50 +39,65 @@ make_leave_dir = re.compile(r"^\s*make\[\d+\]: Leaving directory .*$")
 
 # We want to skip such lines from configure to avoid spurious MAKE expansion errors.
 checking_make = re.compile(r"^checking whether .* sets \$\(\w+\)\.\.\. (yes|no)$")
+compiler_candidate_regex = re.compile(
+    r"(^|[\s;&|()])[\w./+-]*(g?cc|clang|[gc]\+\+|clang\+\+)(-[0-9.]+)?(?=$|[\s;&|().])"
+)
+command_substitution_markers = ("$(", "`")
 
 logger = logging.getLogger(__name__)
 
 
-class ParsingResult(object):
-    def __init__(self):
+class ParsingResult:
+    def __init__(self) -> None:
         self.skipped = 0
         self.count = 0
         self.compdb = []
 
-    def __str__(self):
-        return "Line count: {}, Skipped: {}, Entries: {}".format(self.count, self.skipped, str(self.compdb))
+    def __str__(self) -> str:
+        return f"Line count: {self.count}, Skipped: {self.skipped}, Entries: {self.compdb!s}"
 
 
 class Error(Exception):
-    def __init__(self, msg):
+    def __init__(self, msg) -> None:
         self.msg = msg
 
-    def __str__(self):
-        return "Error: {}".format(self.msg)
+    def __str__(self) -> str:
+        return f"Error: {self.msg}"
 
-def preprocess_build_log(build_log): 
-    new_build_log = []
+
+def iter_preprocessed_build_log(build_log):
     inline_file_pattern = '@"(.*?)"'
-    
-    for line in build_log: 
+
+    if isinstance(build_log, str):
+        build_log = build_log.splitlines()
+
+    for line in build_log:
         result = re.search(inline_file_pattern, line)
-        while result is not None: 
+        while result is not None:
             inline_file_path = result.group(1)
-            with open(inline_file_path, "r") as file: 
+            with open(inline_file_path) as file:
                 inlined_text = file.read()
             line = re.sub(pattern=inline_file_pattern, repl=inlined_text, string=line)
             result = re.search(inline_file_pattern, line)
-        new_build_log += line.splitlines()
+        yield from line.splitlines()
 
-    return new_build_log
+
+def preprocess_build_log(build_log):
+    return list(iter_preprocessed_build_log(build_log))
+
+
+def may_contain_compile_command(line) -> bool:
+    return compiler_candidate_regex.search(line) is not None
 
 
 def parse_build_log(build_log, proj_dir, exclude_files, command_style=False, add_predefined_macros=False,
-                    use_full_path=False, extra_wrappers=[]):
+                    use_full_path=False, extra_wrappers=None):
+    if extra_wrappers is None:
+        extra_wrappers = []
     result = ParsingResult()
 
-    def skip_line(cmd, reason):
-        logger.debug("Line {}: {}. Ignoring: '{}'".format(lineno, reason, cmd))
+    def skip_line(cmd, reason) -> None:
+        logger.debug(f"Line {lineno}: {reason}. Ignoring: '{cmd}'")
         result.skipped += 1
 
     exclude_files_regex = None
@@ -89,7 +106,7 @@ def parse_build_log(build_log, proj_dir, exclude_files, command_style=False, add
             exclude_files = "|".join(exclude_files)
             exclude_files_regex = re.compile(exclude_files)
         except re.error:
-            raise Error('Exclude files regex not valid: {}'.format(exclude_files))
+            raise Error(f'Exclude files regex not valid: {exclude_files}')
 
     compiler_wrappers.update(extra_wrappers)
 
@@ -97,22 +114,22 @@ def parse_build_log(build_log, proj_dir, exclude_files, command_style=False, add
     working_dir = proj_dir
     lineno = 0
 
-    build_log = preprocess_build_log(build_log)
+    lines = iter(iter_preprocessed_build_log(build_log))
 
     # Process build log
-    for line in build_log:
+    for line in lines:
         lineno += 1
         # Concatenate line if need
         accumulate_line = line
-        while (line.endswith('\\\n')):
-            accumulate_line = accumulate_line[:-2]
-            line = next(build_log, '')
+        while line.endswith(('\\\n', '\\')):
+            accumulate_line = accumulate_line.removesuffix('\\\n').removesuffix('\\')
+            line = next(lines, '')
             accumulate_line += line
         line = accumulate_line.rstrip()
 
         # Parse directory that make entering/leaving
         enter_dir = make_enter_dir.match(line)
-        if (make_enter_dir.match(line)):
+        if enter_dir is not None:
             working_dir = enter_dir.group('dir')
             dir_stack.append(working_dir)
             continue
@@ -122,12 +139,15 @@ def parse_build_log(build_log, proj_dir, exclude_files, command_style=False, add
             continue
         if (checking_make.match(line)):
             continue
+        if not may_contain_compile_command(line):
+            result.skipped += 1
+            continue
 
         commands = []
         try:
             commands = CommandProcessor.process(line, working_dir)
         except Exception as err:
-            msg = 'Failed to parse build command [Details: ({}) {}]'.format(type(err), str(err))
+            msg = f'Failed to parse build command [Details: ({type(err)}) {err!s}]'
             skip_line(line, msg)
             continue
 
@@ -144,14 +164,14 @@ def parse_build_log(build_log, proj_dir, exclude_files, command_style=False, add
                 result.count += 1
 
             if filepath and exclude_files_regex and exclude_files_regex.match(filepath):
-                skip_line(cmd, "Excluding file (regex='{}')".format(exclude_files))
+                skip_line(cmd, f"Excluding file (regex='{exclude_files}')")
                 continue
 
             wrappers = c['wrappers']
-            unknown = ["'%s'" % w for w in wrappers if w not in compiler_wrappers]
+            unknown = [f"'{w}'" for w in wrappers if w not in compiler_wrappers]
             if unknown:
                 unknown = ', '.join(unknown)
-                logger.debug("Add command with unknown wrapper(s) {}".format(unknown))
+                logger.debug(f"Add command with unknown wrapper(s) {unknown}")
 
             # add entry to database
             tokens = c['tokens']
@@ -168,7 +188,7 @@ def parse_build_log(build_log, proj_dir, exclude_files, command_style=False, add
 
             command_str = ' '.join(arguments)
 
-            logger.debug("Adding command {}: {}".format(len(result.compdb), command_str))
+            logger.debug(f"Adding command {len(result.compdb)}: {command_str}")
 
             if command_style:
                 result.compdb.append({
@@ -190,10 +210,10 @@ class SubstCommandVisitor(bashlex.ast.nodevisitor):
     """Uses bashlex to parse and process sh/bash substitution commands.
        May result in a parsing exception for invalid commands."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.substs = []
 
-    def visitcommandsubstitution(self, n, cmd):
+    def visitcommandsubstitution(self, n, command) -> bool:
         self.substs.append(n)
         return False
 
@@ -206,6 +226,11 @@ class CommandProcessor(bashlex.ast.nodevisitor):
         trees = bashlex.parser.parse(line)
         if not trees:
             return []
+        if not any(marker in line for marker in command_substitution_markers):
+            processor = CommandProcessor(line, wd)
+            for tree in trees:
+                processor.do_process(tree)
+            return processor.commands
         for tree in trees:
             svisitor = SubstCommandVisitor()
             svisitor.visit(tree)
@@ -226,13 +251,13 @@ class CommandProcessor(bashlex.ast.nodevisitor):
             processor.do_process(tree)
         return processor.commands
 
-    def __init__(self, line, wd):
+    def __init__(self, line, wd) -> None:
         self.line = line
         self.wd = wd
         self.commands = []
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.compiler = None
         self.cmd = None
         self.filepath = None
@@ -244,13 +269,13 @@ class CommandProcessor(bashlex.ast.nodevisitor):
         self.check_last_cmd()
         return self.commands
 
-    def visitcommand(self, node, cmd):
+    def visitcommand(self, n, parts) -> bool:
         self.check_last_cmd()
-        self.cmd = self.line[node.pos[0]:node.pos[1]]
-        logger.debug('New command: {}'.format(self.cmd))
+        self.cmd = self.line[n.pos[0]:n.pos[1]]
+        logger.debug(f'New command: {self.cmd}')
         return True
 
-    def visitword(self, node, word):
+    def visitword(self, n, word) -> bool:
         # Check if it looks like an entry of interest and
         # and try to determine the compiler
         if self.compiler is None:
@@ -265,11 +290,11 @@ class CommandProcessor(bashlex.ast.nodevisitor):
         self.tokens.append(word)
         return True
 
-    def check_last_cmd(self):
+    def check_last_cmd(self) -> None:
         # check if it seems to be a compilation command
         if self.compiler is not None:
-            self.commands.append(dict(cmd=self.cmd, wrappers=self.wrappers, tokens=self.tokens,
-                                 compiler=self.compiler, filepath=self.filepath))
+            self.commands.append({"cmd": self.cmd, "wrappers": self.wrappers, "tokens": self.tokens,
+                                 "compiler": self.compiler, "filepath": self.filepath})
         # reset state to process new command
         self.reset()
 

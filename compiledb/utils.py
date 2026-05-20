@@ -15,9 +15,9 @@ else:  # Python 2 and Python <= 3.5
         return subprocess.check_output(cmd, **kwargs)
 
 try:
-    from shlex import quote as cmd_quote
+    from bashlex.shutils import double_quote as cmd_quote
 except ImportError:
-    from pipes import quote as cmd_quote
+    from shlex import quote as cmd_quote
 
 
 def cmd_join(cmd):

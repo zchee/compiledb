@@ -1,13 +1,13 @@
-import click
 import os
 import stat
 import tempfile
+from subprocess import PIPE, call
+from sys import exit, stderr, stdout
 
-from subprocess import call, PIPE
-from sys import exit, stdout, stderr
+import click
 
 from compiledb import generate
-from compiledb.utils import popen, cmd_join
+from compiledb.utils import cmd_join, popen
 
 
 class AutoconfMockScript:
@@ -20,7 +20,7 @@ class AutoconfMockScript:
     To work around this issue we use a mock/empty script to be used
     in place of config.status and missing is they exist.
     """
-    def __init__(self, verbose):
+    def __init__(self, verbose) -> None:
         self.verbose = verbose
         self.path = None
         self.mock_script = """#!/bin/bash
@@ -55,7 +55,7 @@ class AutoconfMockScript:
     def __exit__(self, exc_type, exc_value, traceback):
         self.cleanup()
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         if not self.path:
             return
         if self.verbose:
@@ -64,12 +64,12 @@ class AutoconfMockScript:
             os.remove(self.path)
 
 
-@click.command(name='make', context_settings=dict(ignore_unknown_options=True))
+@click.command(name='make', context_settings={"ignore_unknown_options": True})
 @click.option('-c', '--cmd', 'make_cmd', nargs=1, required=False,
               help="Command to be used as make executable.")
 @click.argument('make_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def command(ctx, make_cmd, make_args):
+def command(ctx, make_cmd, make_args) -> None:
     """Generates compilation database file for an arbitrary GNU Make command.
      Acts like a make wrapper, forwarding all MAKE_ARGS to make command"""
     make_cmd = make_cmd or 'make'
@@ -78,7 +78,7 @@ def command(ctx, make_cmd, make_args):
     options = ctx.obj
 
     if not options.no_build:
-        cmd = [make_cmd] + list(make_args)
+        cmd = [make_cmd, *list(make_args)]
         print("## Building [{}]...".format(' '.join(cmd)))
         ret = call(cmd, stdout=stdout, stderr=stderr)
         print()
@@ -89,9 +89,9 @@ def command(ctx, make_cmd, make_args):
     args = vars(options)
     del args['no_build']
     with AutoconfMockScript(options.verbose) as mock_script:
-        cmd = [make_cmd, logging_mode_flags] + list(make_args)
+        cmd = [make_cmd, logging_mode_flags, *list(make_args)]
         if mock_script.path:
-            cmd.append("SHELL={}".format(mock_script.path))
+            cmd.append(f"SHELL={mock_script.path}")
         pipe = popen(cmd_join(cmd), stdout=PIPE)
         options.infile = pipe.stdout
         del args['verbose']

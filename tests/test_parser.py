@@ -19,12 +19,13 @@
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 from os import getcwd
+from pathlib import Path
 
-from compiledb.parser import parse_build_log
+from compiledb.parser import may_contain_compile_command, parse_build_log
 from tests.common import input_file
 
 
-def test_empty():
+def test_empty() -> None:
     build_log = ''
     proj_dir = '/tmp'
     exclude_files = []
@@ -33,11 +34,11 @@ def test_empty():
     assert result.count == 0
     assert result.skipped == 0
     assert result.compdb is not None
-    assert type(result.compdb) == list
+    assert isinstance(result.compdb, list)
     assert len(result.compdb) == 0
 
 
-def test_trivial_build_command():
+def test_trivial_build_command() -> None:
     pwd = getcwd()
     build_log = ['gcc -o hello.o -c hello.c']
     result = parse_build_log(
@@ -55,7 +56,7 @@ def test_trivial_build_command():
     }
 
 
-def test_build_commands_with_version():
+def test_build_commands_with_version() -> None:
     pwd = getcwd()
     build_log = ['clang-5.0 -o hello.o -c hello.c']
     result = parse_build_log(
@@ -73,7 +74,7 @@ def test_build_commands_with_version():
     }
 
 
-def test_build_commands_with_wrapper():
+def test_build_commands_with_wrapper() -> None:
     pwd = getcwd()
     build_log = [
         'ccache gcc -o hello.o -c hello.c\n'
@@ -108,7 +109,7 @@ def test_build_commands_with_wrapper():
     }]
 
 
-def test_parse_with_non_build_cmd_entries():
+def test_parse_with_non_build_cmd_entries() -> None:
     pwd = getcwd()
     build_log = [
         'random build log message..\n',
@@ -131,7 +132,7 @@ def test_parse_with_non_build_cmd_entries():
         exclude_files=[])
 
     assert result.count == 2
-    assert result.skipped == 6
+    assert result.skipped == 5
     assert len(result.compdb) == 2
     assert result.compdb == [{
         'directory': pwd,
@@ -144,7 +145,7 @@ def test_parse_with_non_build_cmd_entries():
     }]
 
 
-def test_automake_command():
+def test_automake_command() -> None:
     pwd = getcwd()
     with input_file('autotools_simple.txt') as build_log:
         result = parse_build_log(
@@ -172,7 +173,7 @@ def test_automake_command():
     }
 
 
-def test_multiple_commands_per_line():
+def test_multiple_commands_per_line() -> None:
     pwd = getcwd()
     with input_file('multiple_commands_oneline.txt') as build_log:
         result = parse_build_log(
@@ -193,7 +194,8 @@ def test_multiple_commands_per_line():
         ]
     }
 
-def test_multiple_commands_per_line_command_style():
+
+def test_multiple_commands_per_line_command_style() -> None:
     """Test the command_style option using the multiple_commands_oneline.txt build log.
     """
     cwd = getcwd()
@@ -222,7 +224,7 @@ def test_multiple_commands_per_line_command_style():
     ]
 
 
-def test_parse_file_extensions():
+def test_parse_file_extensions() -> None:
     pwd = getcwd()
     build_log = [
         'gcc -c somefile.cpp\n'
@@ -261,3 +263,38 @@ def test_parse_file_extensions():
         'arguments': ['gcc', '-c', '-o', 'what.o', 'what.s']
     }]
 
+
+def test_compile_command_prefilter_keeps_supported_compiler_forms() -> None:
+    candidate_lines = [
+        'gcc -o hello.o -c hello.c',
+        'clang-5.0 -o hello.o -c hello.c',
+        'ccache gcc -o hello.o -c hello.c',
+        'unknown-wrapper g++ -c main.cpp -o main.o',
+        'icecc ccache arm1999-gnu-etc-g++ -c main.cpp -o main.o',
+        'echo one; gcc -c valid.c; echo two',
+        'some other random build log message with g++ or gcc included.',
+    ]
+    for line in candidate_lines:
+        assert may_contain_compile_command(line), line
+
+
+def test_compile_command_prefilter_skips_obvious_noise() -> None:
+    noise_lines = [
+        'random build log message..',
+        'checking for generated feature... yes',
+        'echo preparing generated unit',
+        '',
+    ]
+    for line in noise_lines:
+        assert not may_contain_compile_command(line), line
+
+
+def test_inline_file_preprocessing_is_preserved(tmp_path: Path) -> None:
+    inline_file = tmp_path / 'commands.txt'
+    inline_file.write_text('gcc -c inline.c\\ng++ -c inline.cpp\\n')
+
+    result = parse_build_log([f'@"{inline_file}"'], getcwd(), [])
+
+    assert result.count == 2
+    assert result.skipped == 0
+    assert [entry['file'] for entry in result.compdb] == ['inline.c', 'inline.cpp']
